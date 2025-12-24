@@ -1,0 +1,91 @@
+from tavily import TavilyClient
+from amadeus import Client,ResponseError
+from dotenv import load_dotenv
+import os
+from os import getenv
+
+load_dotenv()
+
+tavily = TavilyClient()
+
+def discover_flights(query:str) -> str:
+    result = tavily.search(
+        query=query,
+        search_depth="basic",
+        max_results=5
+    )
+
+    summaries=[]
+    for item in result["results"]:
+        summaries.append(item["content"])
+
+        return "\n".join(summaries)
+    
+amadeus=Client(
+    client_id = os.getenv("AMADEUS_API_KEY"),
+    client_secret = os.getenv("AMADEUS_API_SECRET")
+)
+
+def search_flights(origin:str, destination:str, date:str):
+    
+    try:
+        response=amadeus.shopping.flight_offers_search.get(
+            originLocationCode = origin,
+            destinationLocationCode = destination,
+            departureDate = date,
+            adults=1,
+            max=5
+        )
+
+        flights = []
+        for offer in response.data:
+            segment = offer["itineraries"][0]["segments"][0]
+            flights.append({
+                "flight": segment["carrierCode"] + segment["number"],
+                "departure": segment["departure"]["at"],
+                "arrival": segment["arrival"]["at"],
+                "price": offer["price"]["total"],
+                "seats_left": offer.get("numberOfBookableSeats", "Unknown")
+            })
+
+        return flights
+
+    except ResponseError as error:
+        return str(error)
+
+
+                        #AGNO
+
+from agno.agent import Agent
+from agno.models.ollama import Ollama 
+
+agent = Agent(
+    name="Flight Finding Agent",
+    model=Ollama(id="qwen2.5:0.5b"),
+    tools=[discover_flights,search_flights],
+    markdown=True,
+    instructions=["""
+You are a flight search assistant.
+
+Rules:
+- ONLY list flights (ignore buses, trains, cars).
+- If web data is unclear, say "Data not verified".
+- Output MUST be in this format:
+
+Flights Found:
+1. Airline:
+   Flight Number:
+   Departure Time:
+   Price (in INR):
+   Seats Available:
+
+If no verified flight data is found, clearly say so.
+"""],
+debug_mode=True
+)
+
+response = agent.run("Flights from Pune to Mumbai on the date 29-12-2025.")
+print(response.content)
+
+
+
